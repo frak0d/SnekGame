@@ -8,8 +8,11 @@
 #include <concepts>
 #include <iostream>
 #include <algorithm>
+#include <type_traits>
 
+#include <Serial.hpp>
 #include "SnekGame.hpp"
+
 #include <ixwebsocket/IXWebSocket.h>
 #include <ixwebsocket/IXWebSocketServer.h>
 
@@ -32,51 +35,30 @@ server (x,y world size - u16) >> client
 <repeat>
     <--
     server (bool - alive) >> client
-    server (u16 - snek_count) >> client
+    server (u16  - snek_count) >> client
     forall sneks: #let food list be snek id 0
         server (u16 - snek_id) >> client
         server (u16 - num_points) >> client
         server (u32 - color) >> client
-        server (u16 - x,y,x,y...) >> client
+        server (f32 - x,y,x,y...) >> client
     -->
     <--
-    client (u8 - direction) >> server
+    client (f32  - angle) >> server
     client (bool - boost) >> server
     -->
 </repeat>
 */
 
-struct msgbuf
+struct msg_buf : public oSerial
 {
-    std::string buf;
-    
     bool send_to(ix::WebSocket& ws)
     {
-        std::cout << std::format("{} bytes\n", buf.size()) << std::endl;
-        bool sent = ws.sendBinary(buf).success;
-        if (sent) buf.clear();
+        std::cout << std::format("{} bytes\n", out_buffer.size()) << std::endl;
+        bool sent = ws.sendBinary(out_buffer).success;
+        if (sent) out_buffer.clear();
         return sent;
     }
 };
-
-msgbuf& operator<< (msgbuf& msgb, const std::integral auto num)
-{
-    std::cout << "num:" << +num << std::endl;
-    std::string data((char*)&num, (char*)(&num + 1));
-    if constexpr (std::endian::native == std::endian::little)
-    {
-    	std::reverse(data.begin(), data.end());
-    }
-    for (char ch : data) printf("%02x ", ch & 0xff); puts("");
-    msgb.buf += data;
-    return msgb;
-}
-
-template <typename T>
-msgbuf& operator<< (msgbuf& msgb, const Point<T>& pnt)
-{
-    return msgb << pnt.x << pnt.y;
-}
 
 // SIGNAL HANDLERS //
 
@@ -97,7 +79,7 @@ int main()
     std::signal(SIGINT, interrupt_handler);
     std::signal(SIGSEGV, segfault_handler);
     
-    SnekGame game(256, 256);
+    SnekGame game(4096, 4096);
     ix::WebSocketServer server(6969);
     std::map<ix::WebSocket*, uint16_t> ws_pid_map;
     std::atomic<uint16_t> pid_gen{0};
@@ -113,13 +95,13 @@ int main()
                       << "id: " << playerid << '\n'
                       << "ip: " << connectionState->getRemoteIp() << std::endl;
             
-            msgbuf msgb;
+            msg_buf msgb;
             msgb << playerid;
             msgb << game.wrld;
             msgb.send_to(client);
             
             ws_pid_map[&client] = playerid;
-            game.addPlayer(playerid, 0xffffffff);
+            game.addPlayer(playerid, 0x03cafcff);
         }
         else if (msg->type == ix::WebSocketMessageType::Close)
         {
@@ -127,15 +109,18 @@ int main()
                       << connectionState->getRemoteIp() << std::endl;
             
             game.delPlayer(ws_pid_map[&client]);
+            ws_pid_map.erase(&client);
         }
         else if (msg->type == ix::WebSocketMessageType::Message)
         {
             auto& snek = game.snek_list.at(ws_pid_map[&client]);
-            snek.dir = msg->str[0];
-            snek.boost = msg->str[1];
             
-            std::clog << std::format("id:{}, dir:{}, boost:{}",
-                        ws_pid_map[&client],snek.dir,snek.boost) << std::endl;
+            iSerial is{msg->str};
+            is >> snek.angle;
+            is >> snek.boost;
+            
+            std::clog << std::format("id:{}, angle:{}, boost:{}",
+                        ws_pid_map[&client],snek.angle,snek.boost) << std::endl;
         }
         else if (msg->type == ix::WebSocketMessageType::Error)
         {
@@ -164,7 +149,7 @@ int main()
     
     while(1)
     {
-        game.nextTick(); std::this_thread::sleep_for(250ms);
+        game.nextTick(); std::this_thread::sleep_for(1000ms/60.f);
         
         for (const auto& client_ptr : server.getClients())
         {
@@ -174,7 +159,7 @@ int main()
             try {game.getSnek(playerid); alive=true;}
             catch (...) {alive = false;}
             
-            msgbuf msgb;
+            msg_buf msgb;
             msgb << alive;
             msgb << game.snekCount();
             std::cout << "snakes:" << game.snekCount() << std::endl;

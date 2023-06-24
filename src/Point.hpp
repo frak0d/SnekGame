@@ -1,6 +1,6 @@
 #pragma once
 
-#include <iostream>
+#include <Serial.hpp>
 #include <type_traits>
 
 template <typename T=int>
@@ -14,22 +14,26 @@ struct Point
 		return (x == rhs.x) && (y == rhs.y);
 	}
 	
-	bool operator < (const Point& rhs) const
+	template <typename T2>
+	bool operator < (const Point<T2>& rhs) const
 	{
 		return (x < rhs.x) || (y < rhs.y);
 	}
 	
-	bool operator > (const Point& rhs) const
+	template <typename T2>
+	bool operator > (const Point<T2>& rhs) const
 	{
 		return (x > rhs.x) || (y > rhs.y);
 	}
 	
-	bool operator << (const Point& rhs) const
+	template <typename T2>
+	bool operator << (const Point<T2>& rhs) const
 	{
 		return (x < rhs.x) && (y < rhs.y);
 	}
 	
-	bool operator >> (const Point& rhs) const
+	template <typename T2>
+	bool operator >> (const Point<T2>& rhs) const
 	{
 		return (x > rhs.x) && (y > rhs.y);
 	}
@@ -48,3 +52,17 @@ struct Point
 		return {T(x-rhs.x), T(y-rhs.y)};
 	}
 };
+
+// Serialisation Overloads //
+
+template <typename T>
+iSerial& operator >> (iSerial& is, Point<T>& pnt)
+{
+    return is >> pnt.x >> pnt.y;
+}
+
+template <typename T>
+oSerial& operator << (oSerial& os, const Point<T>& pnt)
+{
+    return os << pnt.x << pnt.y;
+}
