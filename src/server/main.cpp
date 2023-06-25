@@ -74,13 +74,20 @@ void segfault_handler(int)
     std::exit(-4);
 }
 
-int main()
+int main(int argc, char* argv[])
 {
+    if (argc < 2)
+    {
+        puts("Port Not Specified!");
+        return -2;
+    }
+    
     std::signal(SIGINT, interrupt_handler);
     std::signal(SIGSEGV, segfault_handler);
     
     SnekGame game(4096, 4096);
-    ix::WebSocketServer server(6969);
+    ix::WebSocketServer server(std::stoul(argv[1]), "127.0.0.1");
+    
     std::map<ix::WebSocket*, uint16_t> ws_pid_map;
     std::atomic<uint16_t> pid_gen{0};
     
@@ -100,34 +107,39 @@ int main()
             msgb << game.wrld;
             msgb.send_to(client);
             
+            game.mtx.lock();
             ws_pid_map[&client] = playerid;
             game.addPlayer(playerid, 0x03cafcff);
+            game.mtx.unlock();
         }
         else if (msg->type == ix::WebSocketMessageType::Close)
         {
             std::clog << "Disconnected from "
                       << connectionState->getRemoteIp() << std::endl;
             
-            game.delPlayer(ws_pid_map[&client]);
+            game.mtx.lock();
+            try {game.delPlayer(ws_pid_map.at(&client));} catch(...) {}
             ws_pid_map.erase(&client);
+            game.mtx.unlock();
         }
         else if (msg->type == ix::WebSocketMessageType::Message)
         {
-            auto& snek = game.snek_list.at(ws_pid_map[&client]);
-            
-            iSerial is{msg->str};
-            is >> snek.angle;
-            is >> snek.boost;
-            
-            std::clog << std::format("id:{}, angle:{}, boost:{}",
-                        ws_pid_map[&client],snek.angle,snek.boost) << std::endl;
+            game.mtx.lock(); try
+            {
+                auto& snek = game.snek_list.at(ws_pid_map.at(&client));
+                
+                iSerial is{msg->str};
+                is >> snek.angle;
+                is >> snek.boost;
+            }
+            catch(...){} //ignore dead sneks
+            game.mtx.unlock();
         }
         else if (msg->type == ix::WebSocketMessageType::Error)
         {
             std::clog << "Connection  Error: " << msg->errorInfo.reason << '\n'
                       << "Retries: " << msg->errorInfo.retries << '\n'
-                      << "Wait  time(ms): " << msg->errorInfo.wait_time << '\n'
-                      << "HTTP  Status: " << msg->errorInfo.http_status << '\n';
+                      << "Wait  time(ms): " << msg->errorInfo.wait_time << '\n';
         }
         else if (msg->type == ix::WebSocketMessageType::Ping)
         {
@@ -149,11 +161,21 @@ int main()
     
     while(1)
     {
-        game.nextTick(); std::this_thread::sleep_for(1000ms/60.f);
+        std::this_thread::sleep_for(1000ms/60.f);
+        
+        game.mtx.lock(); game.nextTick();
         
         for (const auto& client_ptr : server.getClients())
         {
-            const uint16_t playerid = ws_pid_map[client_ptr.get()];
+            uint16_t playerid; try
+            {
+                playerid = ws_pid_map.at(client_ptr.get());
+            }
+            catch(...)
+            {
+                puts("client disconnected abnormally");
+                continue;
+            }
             
             bool alive;
             try {game.getSnek(playerid); alive=true;}
@@ -161,8 +183,7 @@ int main()
             
             msg_buf msgb;
             msgb << alive;
-            msgb << game.snekCount();
-            std::cout << "snakes:" << game.snekCount() << std::endl;
+            msgb << game.snekCount(); //includes dead+alive
             
             for (const auto& [id,snek] : game.snek_list)
             {
@@ -171,8 +192,19 @@ int main()
                 msgb << snek.color;
                 for (const auto& pnt : snek.parts) msgb << pnt;
             }
+            
+            for (const auto& snek : game.food_list)
+            {
+                msgb << uint16_t(0);
+                msgb << uint16_t(snek.parts.size());
+                msgb << snek.color;
+                for (const auto& pnt : snek.parts) msgb << pnt;
+            }
+            
             msgb.send_to(*client_ptr);
         }
+        
+        game.mtx.unlock();
     }
 }
 

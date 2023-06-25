@@ -1,5 +1,10 @@
 #include <SFML/Graphics/Color.hpp>
+#include <SFML/Graphics/Font.hpp>
 #include <SFML/Graphics/RectangleShape.hpp>
+#include <SFML/Graphics/Text.hpp>
+#include <SFML/Graphics/View.hpp>
+#include <SFML/System/Sleep.hpp>
+#include <SFML/System/Time.hpp>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -72,17 +77,23 @@ struct Snek : public sf::Drawable
     
     void draw(sf::RenderTarget& target, sf::RenderStates states) const override
     {
-        bool x = 0;
+        sf::CircleShape circle(8,32);
+        circle.setOrigin(8,8);
+        bool x = parts.size()%2;
+        
         for (int i=parts.size()-1 ; i >= 0 ; --i)
         {
-            x =! x;
-            sf::CircleShape circle(8,32);
+            x = !x;
+            auto high = target.getView().getCenter() + target.getView().getSize()/2.f;
+            auto low  = target.getView().getCenter() - target.getView().getSize()/2.f;
             
-            circle.setOrigin(8,8);
-            circle.setPosition(parts[i].x, parts[i].y);
-            circle.setFillColor(x ? color : sf::Color::White);
-            
-            target.draw(circle, states);
+            if (parts[i].x > low.x  && parts[i].y > low.y
+             && parts[i].x < high.x && parts[i].y < high.y)
+            {
+                circle.setPosition(parts[i].x, parts[i].y);
+                circle.setFillColor(x ? color : sf::Color::White);
+                target.draw(circle, states);
+            }
         }
     }
 };
@@ -91,21 +102,35 @@ struct Food : public Snek
 {
     void draw(sf::RenderTarget& target, sf::RenderStates states) const override
     {
+        sf::CircleShape circle(5,6);
+        circle.setOrigin(5,5);
+        circle.setFillColor(color);
+        circle.setOutlineColor(sf::Color::Magenta);
+        circle.setOutlineThickness(1);
+        
         for (int i=0 ; i < parts.size() ; ++i)
         {
-            sf::CircleShape circle(4,3);
+            auto high = target.getView().getCenter() + target.getView().getSize()/2.f;
+            auto low  = target.getView().getCenter() - target.getView().getSize()/2.f;
             
-            circle.setOrigin(4,4);
-            circle.setPosition(parts[i].x, parts[i].y);
-            circle.setFillColor(color);
-            
-            target.draw(circle, states);
+            if (parts[i].x > low.x  && parts[i].y > low.y
+             && parts[i].x < high.x && parts[i].y < high.y)
+            {
+                circle.setPosition(parts[i].x, parts[i].y);
+                target.draw(circle, states);
+            }
         }
     }
 };
 
-int main()
+int main(int argc, char* argv[])
 {
+    if (argc < 2)
+    {
+        puts("ipv4:port Not Specified!");
+        return -2;
+    }
+    
     std::signal(SIGINT, interrupt_handler);
     std::signal(SIGSEGV, segfault_handler);
     
@@ -114,6 +139,8 @@ int main()
     
     bool alive;
     uint16_t playerid;
+    int score{0};
+    int my_size{0};
     Point<float> wrld;
     Point<float> my_head;
     
@@ -128,7 +155,7 @@ int main()
     
     ix::WebSocket ws;
     msg_buf server{ws};
-    ws.setUrl("ws://3.110.83.3:6969");
+    ws.setUrl("ws://"s + argv[1]);
     
     bool first_time = true;
     
@@ -233,17 +260,24 @@ int main()
     });
     ws.start();
     
+    // wait for connection
+    while (first_time) sf::sleep(sf::milliseconds(10));
+    
     //////////////////////////////////////////////////////////////////////////////////////
     
     sf::ContextSettings context;
     context.antialiasingLevel = 4;
     
-    sf::View view({0.f, 0.f, 1000.f, 750.f});
+    sf::View view({0.f, 0.f, 1280.f, 720.f});
     
-    sf::RenderWindow window(sf::VideoMode(1000, 750), "Score : 0",
-                            sf::Style::Default, context);    
+    sf::RenderWindow window(sf::VideoMode(1280, 720), "Snek Game",
+                            sf::Style::Default, context);
     window.setView(view);
-    window.setFramerateLimit(60);
+    window.setVerticalSyncEnabled(true);
+    
+    sf::Font font;
+    if (!font.loadFromFile("AznUnifiedOblique.otf"))
+        return -1;
     
     sf::Music music;
     music.setLoop(true);
@@ -269,15 +303,33 @@ int main()
             
             else if (event.type == sf::Event::KeyPressed)
             {
-                if (event.key.code == sf::Keyboard::Escape)
+                ;;;; if (event.key.code == sf::Keyboard::Escape)
                 {
                     ws.stop(); window.close();
                 }
+                else if (event.key.code == sf::Keyboard::Right) angle = 0.0001f;
+                else if (event.key.code == sf::Keyboard::Up)    angle = M_PI*3/2;
+                else if (event.key.code == sf::Keyboard::Left)  angle = M_PI;
+                else if (event.key.code == sf::Keyboard::Down)  angle = M_PI/2;
+                else if (event.key.code == sf::Keyboard::Enter) boost = true;
+            }
+            
+            else if (event.type == sf::Event::KeyReleased)
+            {
+                if (event.key.code == sf::Keyboard::Enter)
+                    boost = false;
             }
             
             else if (event.type == sf::Event::MouseButtonPressed)
             {
-                if (event.mouseButton.button == sf::Mouse::Right)
+                if (event.mouseButton.button == sf::Mouse::Left)
+                {
+                    auto pos = window.mapPixelToCoords({event.mouseButton.x, event.mouseButton.y});
+                    float dx = (pos.x - my_head.x);
+                    float dy = (pos.y - my_head.y);
+                    angle = atan2(dy,dx);
+                }
+                else if (event.mouseButton.button == sf::Mouse::Right)
                     boost = true;
             }
             
@@ -292,12 +344,16 @@ int main()
                 if (sf::Mouse::isButtonPressed(sf::Mouse::Left))
                 {
                     auto pos = window.mapPixelToCoords({event.mouseMove.x, event.mouseMove.y});
-                    
                     float dx = (pos.x - my_head.x);
                     float dy = (pos.y - my_head.y);
-                    
                     angle = atan2(dy,dx);
                 }
+            }
+            
+            else if (event.type == sf::Event::MouseWheelScrolled)
+            {
+                view.zoom(1.f - 0.05f*event.mouseWheelScroll.delta);
+                window.setView(view);
             }
         }
         
@@ -324,27 +380,48 @@ int main()
             }
         }
         
-        if (!first_time) //once the connection is done
+        window.setView(window.getDefaultView());
+        sf::Text text(std::format("SCORE : {}", score), font, 48);
+        text.setPosition(window.mapPixelToCoords({int(window.getSize().x-text.getGlobalBounds().width-10),0}));
+        window.draw(text);
+        window.setView(view);
+        
+        net_mtx.lock();
+        
+        for (const auto& food : food_list)
+            window.draw(food);
+        
+        for (const auto& snek : snek_list)
         {
-            net_mtx.lock();
-            
-            for (const auto& food : food_list) window.draw(food);
-            
-            for (const auto& snek : snek_list)
+            if (snek.id == playerid)
             {
-                if (snek.id == playerid)
+                if (snek.parts.size())
                 {
-                    if (snek.parts.size()) my_head = snek.parts[0];
-                    int pos = snek.parts.size()/2; if (pos > 20) pos = 20;
-                    view.setCenter(snek.parts[pos-1].x, snek.parts[pos-1].y); window.setView(view);
-                    window.setTitle(std::format("Score : {}", snek.parts.size()*100));
+                    if (snek.parts.size() > my_size)
+                        score += 100*(snek.parts.size() - my_size);
+                    
+                    my_size = snek.parts.size();
+                    my_head = snek.parts[0];
                 }
-                window.draw(snek);
+                
+                int pos = snek.parts.size()/2; if (pos > 20) pos = 20;
+                view.setCenter(snek.parts[pos-1].x, snek.parts[pos-1].y);
+                window.setView(view);
             }
-            
-            net_mtx.unlock();
+            //else
+            //{
+                text.setString("jojo");
+                text.setCharacterSize(20);
+                sf::FloatRect textRect = text.getLocalBounds();
+                text.setOrigin(textRect.left + textRect.width/2.f,
+                               textRect.top  + textRect.height/2.f);
+                text.setPosition(snek.parts[0].x, snek.parts[0].y - 32);
+                window.draw(text);
+            //}
+            window.draw(snek);
         }
         
+        net_mtx.unlock();
         window.display();
     }
 }
