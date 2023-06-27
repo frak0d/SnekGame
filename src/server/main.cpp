@@ -1,3 +1,4 @@
+#include <ctime>
 #include <map>
 #include <thread>
 #include <ostream>
@@ -53,7 +54,6 @@ struct msg_buf : public oSerial
 {
     bool send_to(ix::WebSocket& ws)
     {
-        std::cout << std::format("{} bytes\n", out_buffer.size()) << std::endl;
         bool sent = ws.sendBinary(out_buffer).success;
         if (sent) out_buffer.clear();
         return sent;
@@ -82,11 +82,12 @@ int main(int argc, char* argv[])
         return -2;
     }
     
+    srand(time(0));
     std::signal(SIGINT, interrupt_handler);
     std::signal(SIGSEGV, segfault_handler);
     
     SnekGame game(4096, 4096);
-    ix::WebSocketServer server(std::stoul(argv[1]), "127.0.0.1");
+    ix::WebSocketServer server(std::stoul(argv[1]), "0.0.0.0");
     
     std::map<ix::WebSocket*, uint16_t> ws_pid_map;
     std::atomic<uint16_t> pid_gen{0};
@@ -109,7 +110,7 @@ int main(int argc, char* argv[])
             
             game.mtx.lock();
             ws_pid_map[&client] = playerid;
-            game.addPlayer(playerid, 0x03cafcff);
+            game.addPlayer(playerid, rand() | 0xff);
             game.mtx.unlock();
         }
         else if (msg->type == ix::WebSocketMessageType::Close)

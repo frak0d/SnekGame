@@ -13,6 +13,7 @@
 #include <ostream>
 #include <stddef.h>
 #include <cstdlib>
+#include <string>
 #include <utility>
 #include <stdio.h>
 #include <stdint.h>
@@ -142,7 +143,7 @@ int main(int argc, char* argv[])
     int score{0};
     int my_size{0};
     Point<float> wrld;
-    Point<float> my_head;
+    Point<float> center;
     
     std::mutex net_mtx;
     std::vector<Snek> snek_list;
@@ -303,7 +304,7 @@ int main(int argc, char* argv[])
             
             else if (event.type == sf::Event::KeyPressed)
             {
-                ;;;; if (event.key.code == sf::Keyboard::Escape)
+                if (event.key.code == sf::Keyboard::Escape)
                 {
                     ws.stop(); window.close();
                 }
@@ -325,8 +326,8 @@ int main(int argc, char* argv[])
                 if (event.mouseButton.button == sf::Mouse::Left)
                 {
                     auto pos = window.mapPixelToCoords({event.mouseButton.x, event.mouseButton.y});
-                    float dx = (pos.x - my_head.x);
-                    float dy = (pos.y - my_head.y);
+                    float dx = (pos.x - center.x);
+                    float dy = (pos.y - center.y);
                     angle = atan2(dy,dx);
                 }
                 else if (event.mouseButton.button == sf::Mouse::Right)
@@ -344,8 +345,8 @@ int main(int argc, char* argv[])
                 if (sf::Mouse::isButtonPressed(sf::Mouse::Left))
                 {
                     auto pos = window.mapPixelToCoords({event.mouseMove.x, event.mouseMove.y});
-                    float dx = (pos.x - my_head.x);
-                    float dy = (pos.y - my_head.y);
+                    float dx = (pos.x - center.x);
+                    float dy = (pos.y - center.y);
                     angle = atan2(dy,dx);
                 }
             }
@@ -401,27 +402,43 @@ int main(int argc, char* argv[])
                         score += 100*(snek.parts.size() - my_size);
                     
                     my_size = snek.parts.size();
-                    my_head = snek.parts[0];
                 }
                 
                 int pos = snek.parts.size()/2; if (pos > 20) pos = 20;
-                view.setCenter(snek.parts[pos-1].x, snek.parts[pos-1].y);
+                center = {snek.parts[pos-1].x, snek.parts[pos-1].y};
+                view.setCenter(center.x, center.y);
                 window.setView(view);
             }
-            //else
-            //{
-                text.setString("jojo");
+            else
+            {
+                text.setString(std::to_string(snek.id));
                 text.setCharacterSize(20);
                 sf::FloatRect textRect = text.getLocalBounds();
                 text.setOrigin(textRect.left + textRect.width/2.f,
                                textRect.top  + textRect.height/2.f);
                 text.setPosition(snek.parts[0].x, snek.parts[0].y - 32);
                 window.draw(text);
-            //}
+            }
             window.draw(snek);
         }
         
         net_mtx.unlock();
+        
+        if (!alive) //Death Screen
+        {
+            window.setView(window.getDefaultView());
+            text.setString("DEATH");
+            text.setFillColor(sf::Color::Red);
+            text.setOutlineColor(sf::Color::White);
+            text.setOutlineThickness(5);
+            text.setCharacterSize(100);
+            auto bounds = text.getLocalBounds();
+            text.setOrigin(window.mapPixelToCoords({int(bounds.left+bounds.width/2), int(bounds.top+bounds.height/2)}));
+            auto win_sz = window.getSize();
+            text.setPosition(win_sz.x/2.f, win_sz.y/2.f);
+            window.draw(text);
+        }
+        
         window.display();
     }
 }
